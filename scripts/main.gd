@@ -1,11 +1,14 @@
 extends Node3D
 ## Entry point: sets up lighting, the world, the camera and the HUD, and turns
-## clicks/taps into tree growth.
+## taps into tree growth.
 ##
 ## Dev command-line flags (after `--`):
 ##   --fresh     start without loading the save file
 ##   --autotest  fast-forward through every milestone (for testing visuals)
 ##   --shot=PATH save a screenshot to PATH (after the autotest, or after 2.5s) and quit
+##   --until=N   stop the autotest at N trees
+##   --shop      open the shop before taking the screenshot
+##   --zoom=N    start with camera size N (bigger = further away)
 
 var world: World
 var cam: IsoCamera
@@ -23,11 +26,17 @@ func _ready() -> void:
 	cam = IsoCamera.new()
 	cam.name = "IsoCamera"
 	add_child(cam)
+	cam.focus(world.forest.center + Terrain.TOWARD * -3.0)
+	cam.tapped.connect(func(_pos: Vector2) -> void: GameState.click_grow())
 	hud = HUD.new()
 	hud.name = "HUD"
 	add_child(hud)
 	GameState.stage_changed.connect(_on_stage_changed)
-	GameState.game_reset.connect(func() -> void: env.background_color = GameData.STAGES[0]["sky"])
+	GameState.game_reset.connect(func() -> void: get_tree().reload_current_scene())
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--zoom="):
+			cam._target_size = float(a.substr(7))
+			cam.camera.size = cam._target_size
 	if OS.get_cmdline_user_args().has("--autotest"):
 		_run_autotest()
 	elif _shot_path() != "":
@@ -42,14 +51,15 @@ func _build_environment() -> void:
 	env.background_color = GameData.STAGES[GameState.stage]["sky"]
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.75, 0.8, 0.85)
-	env.ambient_light_energy = 0.55
+	env.ambient_light_energy = 0.45
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 0.85
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
-	sun.light_energy = 1.0
+	sun.light_energy = 0.9
 	sun.light_color = Color(1.0, 0.96, 0.88)
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
@@ -61,33 +71,10 @@ func _on_stage_changed(stage: int) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	var press_pos := Vector2.INF
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			press_pos = mb.position
-	elif event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		if st.pressed:
-			press_pos = st.position
-	elif event is InputEventKey:
+	if event is InputEventKey:
 		var k := event as InputEventKey
 		if k.pressed and not k.echo and k.keycode == KEY_SPACE:
 			GameState.click_grow()
-			return
-	if press_pos == Vector2.INF:
-		return
-	# Clicking a plantation plot switches to that plant; anywhere else just grows.
-	var ground: Variant = cam.screen_to_ground(press_pos)
-	if ground != null:
-		var z := world.zone_at(ground)
-		if z != null:
-			if not z.is_unlocked():
-				var data: Dictionary = GameData.PLANTS[z.plant_index]
-				hud.show_toast("%s is locked" % data["name"], "Save up %s coins and unlock it from the plants list on the left." % GameData.format_number(data["unlock_cost"]))
-				return
-			GameState.select_plant(z.plant_index)
-	GameState.click_grow()
 
 
 # ------------------------------------------------------------------ dev tools
@@ -97,6 +84,7 @@ func _run_autotest() -> void:
 	GameState.add_coins(5.0)
 	for k in 15:
 		GameState.click_grow()
+	await get_tree().create_timer(1.0).timeout
 	GameState.add_coins(1e7)
 	for i in GameData.PLANTS.size():
 		GameState.try_unlock(i)
@@ -104,13 +92,21 @@ func _run_autotest() -> void:
 		GameState.try_buy_machine(i)
 	GameState.try_buy_click_upgrade()
 	GameState.try_buy_fert_upgrade()
+	var until := 100000
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--until="):
+			until = int(a.substr(8))
 	for target in [5, 20, 50, 100, 200, 400, 800]:
+		target = mini(target, until)
 		await get_tree().create_timer(0.6).timeout
 		var i := randi() % GameData.PLANTS.size()
 		while GameState.total_trees < target:
-			GameState._add_growth(i, GameState.growth_needed(i) * 7.0 / GameState.growth_multiplier(), true)
+			GameState._add_growth(i, GameState.growth_needed(i) * 3.0 / GameState.growth_multiplier(), true)
 			i = (i + 1) % GameData.PLANTS.size()
-		print("[autotest] stage=%d trees=%d coins=%.0f" % [GameState.stage, GameState.total_trees, GameState.coins])
+		if target >= until:
+			print("[autotest] stopped at %d trees" % GameState.total_trees)
+			break
+		print("[autotest] stage=%d trees=%d visible=%d coins=%.0f" % [GameState.stage, GameState.total_trees, world.forest.total_visible(), GameState.coins])
 	await get_tree().create_timer(4.0).timeout
 	GameState.save_game()
 	print("[autotest] animals=%d features=%s" % [world.animals_root.get_child_count(), str(world.features.keys())])
@@ -130,6 +126,9 @@ func _save_shot() -> void:
 	var shot := _shot_path()
 	if shot == "":
 		return
+	if OS.get_cmdline_user_args().has("--shop"):
+		hud.open_shop()
+		await get_tree().create_timer(0.6).timeout
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(shot)
 	print("screenshot saved: ", shot)

@@ -1,36 +1,31 @@
 class_name HUD
 extends CanvasLayer
-## All 2D UI, built in code: stats bar, plant list, shop, milestone bar and
-## "eco fact" popups that teach kids something at every milestone.
+## Clean, minimal portrait UI:
+##   top    : coins pill (left), forest stats pill (right), next-milestone bar
+##   bottom : tray with round plant buttons + a Shop button
+##   sheets : slide-up shop, eco-fact cards
 
-const PANEL_BG := Color(0.08, 0.2, 0.12, 0.82)
-const CARD_BG := Color(1, 1, 1, 0.07)
-const GOLD := Color(1.0, 0.86, 0.3)
-const TOAST_TIME := 8.0
+const INK := Color(0.13, 0.27, 0.18)
+const MUTED := Color(0.4, 0.47, 0.42)
+const GREEN := Color(0.3, 0.7, 0.42)
+const CARD := Color(1, 1, 1, 0.9)
+const TOAST_TIME := 7.0
 
 var _root: Control
 var _coins_label: Label
 var _cps_label: Label
 var _trees_label: Label
 var _co2_label: Label
-var _stage_label: Label
 var _milestone_label: Label
 var _milestone_bar: ProgressBar
-var _hint_label: Label
+var _hint: Label
+var _chips: Array[PlantChip] = []
+var _shop_badge: Control
 
-var _plant_cards: Array[PanelContainer] = []
-var _plant_counts: Array[Label] = []
-var _plant_bars: Array[ProgressBar] = []
-var _plant_buttons: Array[Button] = []
-
-var _click_title: Label
-var _click_btn: Button
-var _fert_title: Label
-var _fert_btn: Button
-var _machine_rows: Array[Control] = []
-var _machine_titles: Array[Label] = []
-var _machine_descs: Array[Label] = []
-var _machine_btns: Array[Button] = []
+var _overlay: ColorRect
+var _sheet: PanelContainer
+var _sheet_open := false
+var _rows: Array[Dictionary] = []   ## {kind, index, row, title, desc, btn, price}
 
 var _toast: PanelContainer
 var _toast_title: Label
@@ -47,20 +42,18 @@ func _ready() -> void:
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.theme = _make_theme()
 	add_child(_root)
-	_build_top_bar()
-	_build_plants_panel()
-	_build_shop_panel()
-	_build_bottom()
+	_build_top()
+	_build_tray()
 	_build_toast()
+	_build_sheet()
 	_confirm = ConfirmationDialog.new()
 	_confirm.title = "Start over?"
-	_confirm.dialog_text = "This erases your forest and coins. Are you sure?"
+	_confirm.dialog_text = "This erases your forest and coins."
 	_confirm.confirmed.connect(GameState.reset_game)
 	_root.add_child(_confirm)
 
 	GameState.stage_changed.connect(_on_stage_changed)
 	GameState.plant_unlocked.connect(_on_plant_unlocked)
-	GameState.game_reset.connect(func() -> void: show_toast("A fresh start!", GameData.STAGES[0]["fact"]))
 	_refresh()
 
 	if GameState.total_trees == 0:
@@ -68,277 +61,390 @@ func _ready() -> void:
 		show_toast(st["title"], st["fact"])
 	if not GameState.offline_report.is_empty():
 		var r := GameState.offline_report
-		show_toast("Welcome back!", "While you were away (%s), your Auto-Planters grew %s trees and earned %s coins." % [
+		show_toast("Welcome back!", "While you were away (%s), your drones grew %s trees and earned %s coins." % [
 			_format_time(r["seconds"]), GameData.format_number(r["trees"]), GameData.format_number(r["coins"])])
 
 
-# ------------------------------------------------------------------ building
+# ------------------------------------------------------------------ helpers
 
 func _make_theme() -> Theme:
 	var t := Theme.new()
-	t.default_font_size = 17
-	var btn := StyleBoxFlat.new()
-	btn.bg_color = Color(0.25, 0.62, 0.3)
-	btn.set_corner_radius_all(10)
-	btn.set_content_margin_all(8)
-	var hover := btn.duplicate() as StyleBoxFlat
-	hover.bg_color = Color(0.32, 0.72, 0.36)
-	var pressed := btn.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color(0.2, 0.5, 0.25)
-	var disabled := btn.duplicate() as StyleBoxFlat
-	disabled.bg_color = Color(0.35, 0.38, 0.36, 0.8)
+	t.default_font_size = 20
+	var btn := _box(GREEN, 24, 10)
+	btn.content_margin_left = 16
+	btn.content_margin_right = 16
+	var hover := _box(GREEN.lightened(0.08), 24, 10)
+	var pressed := _box(GREEN.darkened(0.12), 24, 10)
+	var disabled := _box(Color(0.82, 0.85, 0.83), 24, 10)
+	for b in [hover, pressed, disabled]:
+		b.content_margin_left = 16
+		b.content_margin_right = 16
 	t.set_stylebox("normal", "Button", btn)
 	t.set_stylebox("hover", "Button", hover)
 	t.set_stylebox("pressed", "Button", pressed)
 	t.set_stylebox("disabled", "Button", disabled)
 	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
-	t.set_color("font_disabled_color", "Button", Color(0.8, 0.8, 0.8, 0.7))
-	var bar_bg := StyleBoxFlat.new()
-	bar_bg.bg_color = Color(0, 0, 0, 0.35)
-	bar_bg.set_corner_radius_all(6)
-	var bar_fill := StyleBoxFlat.new()
-	bar_fill.bg_color = Color(0.55, 0.9, 0.35)
-	bar_fill.set_corner_radius_all(6)
-	t.set_stylebox("background", "ProgressBar", bar_bg)
-	t.set_stylebox("fill", "ProgressBar", bar_fill)
+	t.set_color("font_color", "Button", Color.WHITE)
+	t.set_color("font_hover_color", "Button", Color.WHITE)
+	t.set_color("font_pressed_color", "Button", Color.WHITE)
+	t.set_color("font_disabled_color", "Button", Color(1, 1, 1, 0.9))
+	t.set_stylebox("background", "ProgressBar", _box(Color(0, 0, 0, 0.1), 4, 0))
+	t.set_stylebox("fill", "ProgressBar", _box(GREEN, 4, 0))
+	var grabber := _box(Color(0, 0, 0, 0.15), 4, 0)
+	t.set_stylebox("grabber", "VScrollBar", grabber)
+	t.set_stylebox("scroll", "VScrollBar", StyleBoxEmpty.new())
+	t.set_stylebox("scroll", "HScrollBar", StyleBoxEmpty.new())
+	t.set_stylebox("grabber", "HScrollBar", StyleBoxEmpty.new())
 	return t
 
 
-func _panel(color: Color = PANEL_BG, radius: int = 14, margin: int = 12) -> PanelContainer:
-	var p := PanelContainer.new()
+func _box(color: Color, radius: int, margin: int, shadow: bool = false) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = color
 	sb.set_corner_radius_all(radius)
 	sb.set_content_margin_all(margin)
-	p.add_theme_stylebox_override("panel", sb)
+	sb.anti_aliasing = true
+	if shadow:
+		sb.shadow_color = Color(0, 0, 0, 0.12)
+		sb.shadow_size = 10
+		sb.shadow_offset = Vector2(0, 3)
+	return sb
+
+
+func _panel(color: Color = CARD, radius: int = 24, margin: int = 14) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _box(color, radius, margin, true))
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	return p
 
 
-func _label(text: String, size: int = 17, color: Color = Color.WHITE) -> Label:
+func _label(text: String, size: int, color: Color = INK) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
-	l.add_theme_constant_override("outline_size", 4)
 	return l
 
 
-func _build_top_bar() -> void:
-	var bar := _panel()
-	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	bar.offset_left = 12
-	bar.offset_right = -12
-	bar.offset_top = 10
-	_root.add_child(bar)
+func _hbox(sep: int) -> HBoxContainer:
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 28)
-	bar.add_child(h)
-	var coins_box := VBoxContainer.new()
-	coins_box.add_theme_constant_override("separation", -4)
-	_coins_label = _label("0 coins", 30, GOLD)
-	_cps_label = _label("0 / sec", 15, Color(1, 1, 1, 0.8))
-	coins_box.add_child(_coins_label)
-	coins_box.add_child(_cps_label)
-	h.add_child(coins_box)
-	_trees_label = _label("Trees: 0", 20)
-	_co2_label = _label("CO2 cleaned: 0 kg/yr", 20, Color(0.75, 0.95, 1.0))
-	_stage_label = _label("Barren Land", 22, Color(0.7, 1.0, 0.6))
-	h.add_child(_trees_label)
-	h.add_child(_co2_label)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(spacer)
-	h.add_child(_stage_label)
-	var reset := Button.new()
-	reset.text = "Restart"
-	reset.tooltip_text = "Erase progress and start a new forest"
-	reset.pressed.connect(func() -> void: _confirm.popup_centered())
-	h.add_child(reset)
-	for c in h.get_children():
-		if c is Label:
-			(c as Label).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_theme_constant_override("separation", sep)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return h
 
 
-func _build_plants_panel() -> void:
-	var panel := _panel()
-	panel.anchor_top = 0
-	panel.anchor_bottom = 1
-	panel.offset_left = 12
-	panel.offset_top = 92
-	panel.offset_right = 292
-	panel.offset_bottom = -110
-	_root.add_child(panel)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel.add_child(scroll)
+func _vbox(sep: int) -> VBoxContainer:
 	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 8)
-	scroll.add_child(v)
-	v.add_child(_label("Your Plants", 22, Color(0.8, 1.0, 0.7)))
-	for i in GameData.PLANTS.size():
-		var data: Dictionary = GameData.PLANTS[i]
-		var card := _panel(CARD_BG, 10, 8)
-		v.add_child(card)
-		var cv := VBoxContainer.new()
-		cv.add_theme_constant_override("separation", 4)
-		card.add_child(cv)
-		var row := HBoxContainer.new()
-		cv.add_child(row)
-		var swatch := ColorRect.new()
-		swatch.color = TreeFactory.plant_color(data["id"])
-		swatch.custom_minimum_size = Vector2(14, 14)
-		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(swatch)
-		var name_label := _label("Lv%d  %s" % [i + 1, data["name"]], 17)
-		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_label)
-		var count := _label("0", 16, Color(1, 1, 1, 0.8))
-		row.add_child(count)
-		var bar := ProgressBar.new()
-		bar.show_percentage = false
-		bar.custom_minimum_size = Vector2(0, 12)
-		bar.max_value = 1.0
-		cv.add_child(bar)
-		var btn := Button.new()
-		btn.pressed.connect(_on_plant_button.bind(i))
-		cv.add_child(btn)
-		_plant_cards.append(card)
-		_plant_counts.append(count)
-		_plant_bars.append(bar)
-		_plant_buttons.append(btn)
+	v.add_theme_constant_override("separation", sep)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return v
 
 
-func _build_shop_panel() -> void:
-	var panel := _panel()
-	panel.anchor_left = 1
-	panel.anchor_right = 1
-	panel.anchor_bottom = 1
-	panel.offset_left = -372
-	panel.offset_right = -12
-	panel.offset_top = 92
-	panel.offset_bottom = -110
-	_root.add_child(panel)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel.add_child(scroll)
-	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 8)
-	scroll.add_child(v)
-	v.add_child(_label("Shop", 22, Color(0.8, 1.0, 0.7)))
+# ------------------------------------------------------------------ building
 
-	var r1 := _shop_row(v)
-	_click_title = r1[0]
-	_click_btn = r1[2]
-	(r1[1] as Label).text = "Each click grows trees faster."
-	_click_btn.pressed.connect(func() -> void: GameState.try_buy_click_upgrade(); _refresh())
-	var r2 := _shop_row(v)
-	_fert_title = r2[0]
-	_fert_btn = r2[2]
-	(r2[1] as Label).text = "Natural compost: ALL trees grow +25% faster."
-	_fert_btn.pressed.connect(func() -> void: GameState.try_buy_fert_upgrade(); _refresh())
+func _build_top() -> void:
+	# Coins (top-left)
+	var coins := _panel(CARD, 28, 12)
+	coins.position = Vector2(20, 24)
+	coins.offset_left = 20
+	coins.offset_top = 24
+	coins.add_theme_stylebox_override("panel", _box(CARD, 28, 12, true))
+	_root.add_child(coins)
+	var ch := _hbox(10)
+	coins.add_child(ch)
+	ch.add_child(UIIcon.make("coin", 40))
+	var cv := _vbox(-6)
+	_coins_label = _label("0", 32)
+	_cps_label = _label("", 15, MUTED)
+	cv.add_child(_coins_label)
+	cv.add_child(_cps_label)
+	ch.add_child(cv)
+	coins.custom_minimum_size = Vector2(190, 0)
 
-	v.add_child(_label("Auto-Planters", 20, Color(0.8, 1.0, 0.7)))
-	for i in GameData.PLANTS.size():
-		var r := _shop_row(v)
-		_machine_rows.append(r[3])
-		_machine_titles.append(r[0])
-		_machine_descs.append(r[1])
-		_machine_btns.append(r[2])
-		(r[2] as Button).pressed.connect(func() -> void: GameState.try_buy_machine(i); _refresh())
+	# Forest stats (top-right)
+	var stats := _panel(CARD, 28, 12)
+	stats.anchor_left = 1.0
+	stats.anchor_right = 1.0
+	stats.offset_right = -20
+	stats.offset_left = -20
+	stats.offset_top = 24
+	stats.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_root.add_child(stats)
+	var sv := _vbox(2)
+	stats.add_child(sv)
+	var r1 := _hbox(8)
+	r1.add_child(UIIcon.make("leaf", 22))
+	_trees_label = _label("0 trees", 19)
+	r1.add_child(_trees_label)
+	var r2 := _hbox(8)
+	r2.add_child(UIIcon.make("cloud", 22))
+	_co2_label = _label("0 kg CO2/yr", 15, MUTED)
+	r2.add_child(_co2_label)
+	sv.add_child(r1)
+	sv.add_child(r2)
 
-
-## Returns [title Label, description Label, Button, card].
-func _shop_row(parent: Control) -> Array:
-	var card := _panel(CARD_BG, 10, 8)
-	parent.add_child(card)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	card.add_child(h)
-	var tv := VBoxContainer.new()
-	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	tv.add_theme_constant_override("separation", 0)
-	h.add_child(tv)
-	var title := _label("", 16)
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title.custom_minimum_size = Vector2(170, 0)
-	var desc := _label("", 13, Color(1, 1, 1, 0.75))
-	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.custom_minimum_size = Vector2(170, 0)
-	tv.add_child(title)
-	tv.add_child(desc)
-	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(100, 44)
-	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	h.add_child(btn)
-	return [title, desc, btn, card]
-
-
-func _build_bottom() -> void:
-	var panel := _panel()
-	panel.anchor_left = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_top = 1
-	panel.anchor_bottom = 1
-	panel.offset_left = -330
-	panel.offset_right = 330
-	panel.offset_top = -98
-	panel.offset_bottom = -12
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_root.add_child(panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 4)
-	panel.add_child(v)
-	_hint_label = _label("", 18, Color(1, 1, 0.85))
-	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_hint_label)
-	_milestone_label = _label("", 15, Color(0.8, 1.0, 0.7))
+	# Next milestone (centered under the pills)
+	var ms := _vbox(6)
+	ms.anchor_left = 0.5
+	ms.anchor_right = 0.5
+	ms.offset_left = -170
+	ms.offset_right = 170
+	ms.offset_top = 112
+	ms.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_root.add_child(ms)
+	_milestone_label = _label("", 16, Color(1, 1, 1))
 	_milestone_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_milestone_label)
+	_milestone_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.35))
+	_milestone_label.add_theme_constant_override("shadow_offset_y", 1)
+	_milestone_label.add_theme_constant_override("shadow_outline_size", 3)
 	_milestone_bar = ProgressBar.new()
 	_milestone_bar.show_percentage = false
-	_milestone_bar.custom_minimum_size = Vector2(0, 14)
+	_milestone_bar.custom_minimum_size = Vector2(0, 6)
 	_milestone_bar.max_value = 1.0
-	v.add_child(_milestone_bar)
+	_milestone_bar.add_theme_stylebox_override("background", _box(Color(1, 1, 1, 0.45), 3, 0))
+	_milestone_bar.add_theme_stylebox_override("fill", _box(Color(1, 1, 1, 0.95), 3, 0))
+	_milestone_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ms.add_child(_milestone_label)
+	ms.add_child(_milestone_bar)
+
+
+func _build_tray() -> void:
+	var tray := PanelContainer.new()
+	var sb := _box(CARD, 0, 10, true)
+	sb.corner_radius_top_left = 32
+	sb.corner_radius_top_right = 32
+	sb.content_margin_bottom = 22
+	sb.content_margin_left = 12
+	sb.content_margin_right = 16
+	tray.add_theme_stylebox_override("panel", sb)
+	tray.mouse_filter = Control.MOUSE_FILTER_STOP
+	tray.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	tray.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_root.add_child(tray)
+	var h := _hbox(10)
+	tray.add_child(h)
+	var scroll := ScrollContainer.new()
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 108)
+	h.add_child(scroll)
+	var chips := _hbox(0)
+	scroll.add_child(chips)
+	for i in GameData.PLANTS.size():
+		var data: Dictionary = GameData.PLANTS[i]
+		var chip := PlantChip.new()
+		chip.index = i
+		chip.level = i + 1
+		chip.label = data["short"]
+		chip.color = TreeFactory.plant_color(data["id"])
+		chip.pressed.connect(_on_chip)
+		chips.add_child(chip)
+		_chips.append(chip)
+
+	# Round shop button
+	var shop := Button.new()
+	shop.custom_minimum_size = Vector2(76, 76)
+	shop.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for state in ["normal", "hover", "pressed"]:
+		var b := _box(GREEN if state != "pressed" else GREEN.darkened(0.12), 38, 0)
+		shop.add_theme_stylebox_override(state, b)
+	shop.pressed.connect(open_shop)
+	h.add_child(shop)
+	var icon := UIIcon.make("bag", 34)
+	icon.size = Vector2(34, 34)
+	icon.position = Vector2(21, 19)
+	shop.add_child(icon)
+	_shop_badge = Panel.new()
+	_shop_badge.add_theme_stylebox_override("panel", _box(Color(1.0, 0.45, 0.35), 8, 0))
+	_shop_badge.size = Vector2(16, 16)
+	_shop_badge.position = Vector2(56, 4)
+	_shop_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shop.add_child(_shop_badge)
+
+	_hint = _label("Tap anywhere to grow", 18, Color.WHITE)
+	_hint.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.4))
+	_hint.add_theme_constant_override("shadow_outline_size", 4)
+	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_hint.offset_top = -190
+	_hint.offset_bottom = -160
+	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_hint)
 
 
 func _build_toast() -> void:
-	_toast = _panel(Color(0.98, 0.96, 0.86, 0.96), 16, 16)
+	_toast = _panel(Color(1, 1, 1, 0.97), 24, 18)
 	_toast.anchor_left = 0.5
 	_toast.anchor_right = 0.5
-	_toast.offset_left = -290
-	_toast.offset_right = 290
-	_toast.offset_top = 96
+	_toast.offset_left = -300
+	_toast.offset_right = 300
+	_toast.offset_top = 156
 	_toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_toast.visible = false
-	_toast.gui_input.connect(func(e: InputEvent) -> void:
-		if e is InputEventMouseButton and (e as InputEventMouseButton).pressed:
-			_toast_timer = 0.0)
+	_toast.gui_input.connect(_on_toast_input)
 	_root.add_child(_toast)
-	var v := VBoxContainer.new()
+	var v := _vbox(6)
 	_toast.add_child(v)
-	_toast_title = _label("", 24, Color(0.15, 0.45, 0.15))
-	_toast_title.add_theme_constant_override("outline_size", 0)
-	_toast_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast_body = _label("", 17, Color(0.2, 0.2, 0.2))
-	_toast_body.add_theme_constant_override("outline_size", 0)
+	var th := _hbox(10)
+	th.add_child(UIIcon.make("leaf", 26))
+	_toast_title = _label("", 23, INK)
+	_toast_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_toast_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	th.add_child(_toast_title)
+	_toast_body = _label("", 18, MUTED)
 	_toast_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_toast_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast_body.custom_minimum_size = Vector2(540, 0)
-	var tap := _label("(tap to close)", 12, Color(0.4, 0.4, 0.4))
-	tap.add_theme_constant_override("outline_size", 0)
-	tap.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	v.add_child(_toast_title)
+	_toast_body.custom_minimum_size = Vector2(560, 0)
+	v.add_child(th)
 	v.add_child(_toast_body)
-	v.add_child(tap)
 
 
-# ------------------------------------------------------------------ runtime
+func _build_sheet() -> void:
+	_overlay = ColorRect.new()
+	_overlay.color = Color(0, 0, 0, 0.3)
+	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_overlay.visible = false
+	_overlay.gui_input.connect(_on_overlay_input)
+	_root.add_child(_overlay)
+
+	_sheet = PanelContainer.new()
+	var sb := _box(Color(0.97, 0.98, 0.97), 0, 22, true)
+	sb.corner_radius_top_left = 32
+	sb.corner_radius_top_right = 32
+	sb.content_margin_bottom = 30
+	_sheet.add_theme_stylebox_override("panel", sb)
+	_sheet.mouse_filter = Control.MOUSE_FILTER_STOP
+	_sheet.anchor_left = 0
+	_sheet.anchor_right = 1
+	_sheet.anchor_top = 1
+	_sheet.anchor_bottom = 1
+	_sheet.offset_top = 0
+	_sheet.offset_bottom = 0
+	_sheet.visible = false
+	_root.add_child(_sheet)
+	var v := _vbox(12)
+	_sheet.add_child(v)
+	var header := _hbox(8)
+	var title := _label("Shop", 30)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var close := Button.new()
+	close.custom_minimum_size = Vector2(48, 48)
+	for state in ["normal", "hover", "pressed"]:
+		close.add_theme_stylebox_override(state, _box(Color(0, 0, 0, 0.06 if state == "normal" else 0.1), 24, 0))
+	var x := UIIcon.make("close", 22, MUTED)
+	x.position = Vector2(13, 13)
+	close.add_child(x)
+	close.pressed.connect(close_shop)
+	header.add_child(close)
+	v.add_child(header)
+
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 620)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(scroll)
+	var list := _vbox(10)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+
+	list.add_child(_section("Upgrades"))
+	_add_row(list, "click", 0, "drop", Color.WHITE)
+	_add_row(list, "fert", 0, "sprout", Color.WHITE)
+	list.add_child(_section("Planter Drones"))
+	for i in GameData.PLANTS.size():
+		_add_row(list, "drone", i, "drone", TreeFactory.plant_color(GameData.PLANTS[i]["id"]))
+	var restart := Button.new()
+	restart.text = "Restart game"
+	restart.flat = true
+	restart.add_theme_color_override("font_color", MUTED)
+	restart.add_theme_color_override("font_hover_color", INK)
+	restart.add_theme_font_size_override("font_size", 16)
+	restart.pressed.connect(func() -> void: _confirm.popup_centered())
+	list.add_child(restart)
+
+
+func _section(text: String) -> Label:
+	var l := _label(text.to_upper(), 14, MUTED)
+	return l
+
+
+func _add_row(parent: Control, kind: String, index: int, icon_kind: String, icon_tint: Color) -> void:
+	var row := _panel(Color.WHITE, 20, 12)
+	row.add_theme_stylebox_override("panel", _box(Color.WHITE, 20, 12))
+	parent.add_child(row)
+	var h := _hbox(14)
+	row.add_child(h)
+	var icon_bg := PanelContainer.new()
+	icon_bg.add_theme_stylebox_override("panel", _box(Color(0.92, 0.96, 0.92), 26, 8))
+	icon_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon_bg.add_child(UIIcon.make(icon_kind, 36, icon_tint))
+	h.add_child(icon_bg)
+	var tv := _vbox(0)
+	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var title := _label("", 20)
+	var desc := _label("", 15, MUTED)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tv.add_child(title)
+	tv.add_child(desc)
+	h.add_child(tv)
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(130, 52)
+	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var bh := _hbox(6)
+	bh.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bh.alignment = BoxContainer.ALIGNMENT_CENTER
+	bh.add_child(UIIcon.make("coin", 22))
+	var price := _label("", 19, Color.WHITE)
+	bh.add_child(price)
+	btn.add_child(bh)
+	btn.pressed.connect(_on_buy.bind(kind, index))
+	h.add_child(btn)
+	_rows.append({"kind": kind, "index": index, "row": row, "title": title, "desc": desc, "btn": btn, "price": price, "content": bh})
+
+
+# ------------------------------------------------------------------ shop sheet
+
+func open_shop() -> void:
+	if _sheet_open:
+		return
+	_sheet_open = true
+	_refresh()
+	_overlay.visible = true
+	_overlay.modulate.a = 0.0
+	_sheet.visible = true
+	var h := _sheet.get_combined_minimum_size().y
+	_sheet.offset_top = 0
+	_sheet.offset_bottom = h
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_overlay, "modulate:a", 1.0, 0.2)
+	tw.tween_property(_sheet, "offset_top", -h, 0.28).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_sheet, "offset_bottom", 0.0, 0.28).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+func close_shop() -> void:
+	if not _sheet_open:
+		return
+	_sheet_open = false
+	var h := _sheet.size.y
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_overlay, "modulate:a", 0.0, 0.2)
+	tw.tween_property(_sheet, "offset_top", 0.0, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	tw.tween_property(_sheet, "offset_bottom", h, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(_hide_sheet)
+
+
+func _hide_sheet() -> void:
+	_overlay.visible = false
+	_sheet.visible = false
+
+
+func _on_overlay_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton and not (e as InputEventMouseButton).pressed:
+		close_shop()
+
+
+# ------------------------------------------------------------------ toasts
 
 func show_toast(title: String, body: String) -> void:
 	_toast_queue.append({"title": title, "body": body})
@@ -355,10 +461,19 @@ func _next_toast() -> void:
 	_toast_body.text = t["body"]
 	_toast.visible = true
 	_toast.modulate.a = 0.0
-	_toast.scale = Vector2.ONE
-	create_tween().tween_property(_toast, "modulate:a", 1.0, 0.3)
+	_toast.offset_top = 140
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_toast, "modulate:a", 1.0, 0.25)
+	tw.tween_property(_toast, "offset_top", 156.0, 0.3).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_toast_timer = TOAST_TIME
 
+
+func _on_toast_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton and not (e as InputEventMouseButton).pressed:
+		_toast_timer = 0.0
+
+
+# ------------------------------------------------------------------ refresh
 
 func _process(delta: float) -> void:
 	if _toast.visible:
@@ -373,59 +488,65 @@ func _process(delta: float) -> void:
 
 func _refresh() -> void:
 	var gs := GameState
-	_coins_label.text = "%s coins" % GameData.format_number(gs.coins)
-	_cps_label.text = "+%s coins / sec from machines" % GameData.format_number(gs.coins_per_second())
-	_trees_label.text = "Trees planted: %s" % GameData.format_number(gs.total_trees)
-	_co2_label.text = "CO2 cleaned: ~%s kg/year" % GameData.format_number(gs.co2_per_year())
-	_stage_label.text = "Ecosystem: %s" % GameData.STAGES[gs.stage]["name"]
+	_coins_label.text = GameData.format_number(gs.coins)
+	var cps := gs.coins_per_second()
+	_cps_label.text = "+%s / sec" % GameData.format_number(cps) if cps > 0.0 else "coins"
+	_trees_label.text = "%s trees" % GameData.format_number(gs.total_trees)
+	_co2_label.text = "%s kg CO2 / yr" % GameData.format_number(gs.co2_per_year())
 
-	var sel_name: String = GameData.PLANTS[gs.selected]["name"]
-	_hint_label.text = "Click anywhere to help your %s grow!  (+%s per click)" % [sel_name, GameData.format_number(gs.click_power() * gs.growth_multiplier())]
 	var next := gs.next_stage_trees()
 	if next < 0:
-		_milestone_label.text = "Every milestone reached! Your ecosystem is complete."
+		_milestone_label.text = "%s  ·  every milestone reached" % GameData.STAGES[gs.stage]["name"]
 		_milestone_bar.value = 1.0
 	else:
 		var prev: int = GameData.STAGES[gs.stage]["trees"]
-		var next_name: String = GameData.STAGES[gs.stage + 1]["name"]
-		_milestone_label.text = "Next milestone: %s  (%d / %d trees)" % [next_name, gs.total_trees, next]
+		_milestone_label.text = "Next: %s  ·  %d / %d" % [GameData.STAGES[gs.stage + 1]["name"], gs.total_trees, next]
 		_milestone_bar.value = clampf(float(gs.total_trees - prev) / float(next - prev), 0.0, 1.0)
 
-	for i in GameData.PLANTS.size():
-		var data: Dictionary = GameData.PLANTS[i]
+	_hint.visible = gs.total_trees < 8
+	_hint.text = "Tap anywhere to grow your %s" % GameData.PLANTS[gs.selected]["name"]
+
+	for i in _chips.size():
 		var unlocked: bool = gs.unlocked[i]
-		var btn := _plant_buttons[i]
-		_plant_bars[i].visible = unlocked
-		_plant_counts[i].text = "x%s" % GameData.format_number(gs.trees_per_type[i]) if unlocked else ""
-		if unlocked:
-			_plant_bars[i].value = gs.progress[i] / gs.growth_needed(i)
-			var selected := gs.selected == i
-			btn.text = "Growing (+%s each)" % GameData.format_number(gs.reward(i)) if selected else "Grow this (+%s each)" % GameData.format_number(gs.reward(i))
-			btn.disabled = selected
-		else:
-			btn.text = "Unlock: %s coins" % GameData.format_number(data["unlock_cost"])
-			btn.disabled = gs.coins < gs.unlock_cost(i)
-		var sb := _plant_cards[i].get_theme_stylebox("panel") as StyleBoxFlat
-		sb.bg_color = Color(1, 0.95, 0.5, 0.22) if gs.selected == i else CARD_BG
+		_chips[i].set_state(gs.progress[i] / gs.growth_needed(i), gs.selected == i, not unlocked,
+				gs.coins >= gs.unlock_cost(i), GameData.format_number(gs.unlock_cost(i)))
 
-	_click_title.text = "Watering Can  Lv %d" % gs.click_level
-	_click_btn.text = "%s" % GameData.format_number(gs.click_upgrade_cost())
-	_click_btn.disabled = gs.coins < gs.click_upgrade_cost()
-	_fert_title.text = "Compost  Lv %d" % gs.fert_level
-	_fert_btn.text = "%s" % GameData.format_number(gs.fert_upgrade_cost())
-	_fert_btn.disabled = gs.coins < gs.fert_upgrade_cost()
-
-	for i in GameData.PLANTS.size():
-		var data: Dictionary = GameData.PLANTS[i]
-		var lvl: int = gs.machine_level[i]
-		_machine_rows[i].visible = gs.unlocked[i]
-		_machine_titles[i].text = "%s Planter  Lv %d" % [data["name"], lvl]
-		if lvl == 0:
-			_machine_descs[i].text = "Plants %s trees for you, even while you're away!" % data["name"]
-		else:
-			_machine_descs[i].text = "%s trees/min  (x2 speed every 10 levels)" % _fmt_rate(gs.trees_per_second(i) * 60.0)
-		_machine_btns[i].text = ("Buy\n%s" if lvl == 0 else "Upgrade\n%s") % GameData.format_number(gs.machine_cost(i))
-		_machine_btns[i].disabled = gs.coins < gs.machine_cost(i)
+	var any_affordable := false
+	for r in _rows:
+		var kind: String = r["kind"]
+		var i: int = r["index"]
+		var title: Label = r["title"]
+		var desc: Label = r["desc"]
+		var btn: Button = r["btn"]
+		var price: Label = r["price"]
+		var cost := 0.0
+		match kind:
+			"click":
+				cost = gs.click_upgrade_cost()
+				title.text = "Watering Can  ·  Lv %d" % gs.click_level
+				desc.text = "+%s growth per tap" % GameData.format_number(gs.click_power())
+			"fert":
+				cost = gs.fert_upgrade_cost()
+				title.text = "Compost  ·  Lv %d" % gs.fert_level
+				desc.text = "All trees grow 25% faster"
+			"drone":
+				var data: Dictionary = GameData.PLANTS[i]
+				var lvl: int = gs.machine_level[i]
+				(r["row"] as Control).visible = gs.unlocked[i]
+				cost = gs.machine_cost(i)
+				title.text = "%s Drone%s" % [data["short"], ("  ·  Lv %d" % lvl) if lvl > 0 else ""]
+				if lvl == 0:
+					desc.text = "Grows %s for you, even when you're away" % data["name"]
+				else:
+					desc.text = "%s trees / min" % _fmt_rate(gs.trees_per_second(i) * 60.0)
+				if not gs.unlocked[i]:
+					continue
+		price.text = GameData.format_number(cost)
+		var can := gs.coins >= cost
+		btn.disabled = not can
+		(r["content"] as Control).modulate.a = 1.0 if can else 0.6
+		any_affordable = any_affordable or can
+	_shop_badge.visible = any_affordable
 
 
 func _fmt_rate(v: float) -> String:
@@ -445,17 +566,25 @@ func _format_time(seconds: float) -> String:
 
 # ------------------------------------------------------------------ events
 
-func _on_plant_button(i: int) -> void:
+func _on_chip(i: int) -> void:
 	if GameState.unlocked[i]:
 		GameState.select_plant(i)
-	else:
-		GameState.try_unlock(i)
+	elif not GameState.try_unlock(i):
+		show_toast("%s is locked" % GameData.PLANTS[i]["name"], "Collect %s coins to plant it." % GameData.format_number(GameState.unlock_cost(i)))
+	_refresh()
+
+
+func _on_buy(kind: String, i: int) -> void:
+	match kind:
+		"click": GameState.try_buy_click_upgrade()
+		"fert": GameState.try_buy_fert_upgrade()
+		"drone": GameState.try_buy_machine(i)
 	_refresh()
 
 
 func _on_plant_unlocked(i: int) -> void:
 	var data: Dictionary = GameData.PLANTS[i]
-	show_toast("New plant: %s!" % data["name"], data["fact"])
+	show_toast("New plant: %s" % data["name"], data["fact"])
 
 
 func _on_stage_changed(stage: int) -> void:

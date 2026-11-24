@@ -84,26 +84,30 @@ static func _sequoia(b: LowPoly.Builder) -> void:
 	b.add(LowPoly.cone(0.35, 0.8, 7), g.lightened(0.15), LowPoly.xf(Vector3(0, 3.55, 0)), 0.04)
 
 
-## The Auto-Planter machine: a water tank on a base with a spinning sprinkler.
-## Returns the root node; the rotor is the child named "Rotor".
-static func machine(plant_color: Color) -> Node3D:
+## The Planter Drone (automation): a little hovering robot that waters its
+## plant's sapling. Rotor nodes are children named "Rotor0".."Rotor3".
+static func drone(plant_color: Color) -> Node3D:
 	var root := Node3D.new()
 	var b := LowPoly.Builder.new()
-	b.add(LowPoly.box(Vector3(0.9, 0.25, 0.9)), Color(0.95, 0.75, 0.2), LowPoly.xf(Vector3(0, 0.125, 0)))
-	b.add(LowPoly.cylinder(0.3, 0.32, 0.6, 8), Color(0.35, 0.6, 0.9), LowPoly.xf(Vector3(-0.15, 0.55, -0.1)))
-	b.add(LowPoly.cylinder(0.32, 0.32, 0.06, 8), Color(0.25, 0.25, 0.3), LowPoly.xf(Vector3(-0.15, 0.88, -0.1)))
-	b.add(LowPoly.box(Vector3(0.28, 0.35, 0.28)), plant_color, LowPoly.xf(Vector3(0.25, 0.42, 0.25)))
-	b.add(LowPoly.cylinder(0.04, 0.04, 0.7, 5), Color(0.5, 0.5, 0.55), LowPoly.xf(Vector3(0.25, 0.8, 0.25)))
+	b.add(LowPoly.cylinder(0.32, 0.26, 0.2, 8), Color(0.96, 0.96, 0.94))
+	b.add(LowPoly.sphere(0.2, 0.22, 8, 3), plant_color, LowPoly.xf(Vector3(0, 0.1, 0)))
+	b.add(LowPoly.cylinder(0.08, 0.05, 0.12, 6), Color(0.35, 0.6, 0.9), LowPoly.xf(Vector3(0, -0.15, 0)))
+	b.add(LowPoly.box(Vector3(0.05, 0.03, 0.05)), Color(0.15, 0.15, 0.2), LowPoly.xf(Vector3(-0.08, 0.04, 0.27)))
+	b.add(LowPoly.box(Vector3(0.05, 0.03, 0.05)), Color(0.15, 0.15, 0.2), LowPoly.xf(Vector3(0.08, 0.04, 0.27)))
+	for k in 4:
+		var ang := PI * 0.25 + k * PI * 0.5
+		var dir := Vector3(cos(ang), 0, sin(ang))
+		b.add(LowPoly.box(Vector3(0.5, 0.04, 0.06)), Color(0.8, 0.8, 0.82), LowPoly.xf(dir * 0.3, Vector3(0, -rad_to_deg(ang), 0)))
 	root.add_child(LowPoly.instance(b.commit()))
-	var rotor := Node3D.new()
-	rotor.name = "Rotor"
-	rotor.position = Vector3(0.25, 1.15, 0.25)
-	var rb := LowPoly.Builder.new()
-	rb.add(LowPoly.box(Vector3(0.9, 0.05, 0.08)), Color(0.85, 0.85, 0.9))
-	rb.add(LowPoly.box(Vector3(0.08, 0.05, 0.9)), Color(0.85, 0.85, 0.9))
-	rb.add(LowPoly.sphere(0.07, 0.14, 5, 3), Color(0.9, 0.3, 0.2))
-	rotor.add_child(LowPoly.instance(rb.commit()))
-	root.add_child(rotor)
+	var rotor_mesh := LowPoly.Builder.new()
+	rotor_mesh.add(LowPoly.box(Vector3(0.36, 0.015, 0.05)), Color(0.25, 0.25, 0.3))
+	rotor_mesh.add(LowPoly.cylinder(0.03, 0.03, 0.05, 5), Color(0.9, 0.35, 0.25))
+	var rm := rotor_mesh.commit()
+	for k in 4:
+		var ang := PI * 0.25 + k * PI * 0.5
+		var rotor := LowPoly.instance(rm, Vector3(cos(ang) * 0.52, 0.05, sin(ang) * 0.52), false)
+		rotor.name = "Rotor%d" % k
+		root.add_child(rotor)
 	return root
 
 

@@ -1,15 +1,23 @@
 class_name IsoCamera
 extends Node3D
-## Orthographic isometric camera.
-## Mouse wheel / pinch-less +/- keys: zoom.  Right or middle drag / WASD / arrows: pan.
+## Orthographic isometric camera made for portrait phones.
+## Tap = grow (emits `tapped`), drag = pan, pinch / mouse wheel = zoom.
+## Desktop extras: right/middle drag, WASD / arrows, +/- keys.
 
-const MIN_SIZE := 12.0
-const MAX_SIZE := 48.0
-const PAN_LIMIT := Vector2(20.0, 16.0)
+signal tapped(screen_pos: Vector2)
+
+const MIN_SIZE := 14.0
+const MAX_SIZE := 60.0
+const DRAG_THRESHOLD := 14.0
 
 var camera: Camera3D
 var _target_size := 30.0
-var _dragging := false
+var _pressing := false
+var _dragged := false
+var _press_pos := Vector2.ZERO
+var _side_drag := false
+var _touches := {}
+var _pinch_dist := 0.0
 
 
 func _ready() -> void:
@@ -19,13 +27,18 @@ func _ready() -> void:
 	add_child(tilt)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	camera.size = _target_size
-	camera.position = Vector3(0, 0, 60)
+	camera.position = Vector3(0, 0, 70)
 	camera.near = 0.1
 	camera.far = 200.0
 	tilt.add_child(camera)
 	camera.make_current()
-	position = Vector3(0, 0, 1.5)
+
+
+func focus(world_pos: Vector3) -> void:
+	position = Vector3(world_pos.x, 0, world_pos.z)
+	_clamp()
 
 
 func _process(delta: float) -> void:
@@ -36,48 +49,82 @@ func _process(delta: float) -> void:
 	if move != Vector2.ZERO:
 		_pan_screen(move.limit_length(1.0) * camera.size * delta * 0.8)
 	if Input.is_key_pressed(KEY_EQUAL) or Input.is_key_pressed(KEY_KP_ADD):
-		_target_size = clampf(_target_size - delta * 20.0, MIN_SIZE, MAX_SIZE)
+		_zoom(1.0 - delta)
 	if Input.is_key_pressed(KEY_MINUS) or Input.is_key_pressed(KEY_KP_SUBTRACT):
-		_target_size = clampf(_target_size + delta * 20.0, MIN_SIZE, MAX_SIZE)
+		_zoom(1.0 + delta)
 
 
 func _key_axis(neg: Key, pos: Key) -> float:
 	return (1.0 if Input.is_key_pressed(pos) else 0.0) - (1.0 if Input.is_key_pressed(neg) else 0.0)
 
 
+func _zoom(factor: float) -> void:
+	_target_size = clampf(_target_size * factor, MIN_SIZE, MAX_SIZE)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# Two-finger pinch (real touch events; single touches arrive as emulated mouse).
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			_touches[st.index] = st.position
+		else:
+			_touches.erase(st.index)
+		_pinch_dist = 0.0
+		if _touches.size() >= 2:
+			_dragged = true
+		return
+	if event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		_touches[sd.index] = sd.position
+		if _touches.size() >= 2:
+			var pts: Array = _touches.values()
+			var d := (pts[0] as Vector2).distance_to(pts[1] as Vector2)
+			if _pinch_dist > 0.0 and d > 0.0:
+				_zoom(_pinch_dist / d)
+			_pinch_dist = d
+			_dragged = true
+		return
+	if event is InputEventMagnifyGesture:
+		_zoom(1.0 / (event as InputEventMagnifyGesture).factor)
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_target_size = clampf(_target_size * 0.9, MIN_SIZE, MAX_SIZE)
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_target_size = clampf(_target_size * 1.1, MIN_SIZE, MAX_SIZE)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
-			_dragging = mb.pressed
-	elif event is InputEventMouseMotion and _dragging:
+		match mb.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if mb.pressed: _zoom(0.9)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if mb.pressed: _zoom(1.1)
+			MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE:
+				_side_drag = mb.pressed
+			MOUSE_BUTTON_LEFT:
+				if mb.pressed:
+					_pressing = true
+					_dragged = false
+					_press_pos = mb.position
+				else:
+					if _pressing and not _dragged:
+						tapped.emit(mb.position)
+					_pressing = false
+	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		var px_to_world := camera.size / float(get_viewport().get_visible_rect().size.y)
-		_pan_screen(-mm.relative * px_to_world)
+		if _pressing and not _dragged and mm.position.distance_to(_press_pos) > DRAG_THRESHOLD:
+			_dragged = true
+		if (_pressing and _dragged and _touches.size() < 2) or _side_drag:
+			var px_to_world := camera.size / float(get_viewport().get_visible_rect().size.y)
+			_pan_screen(-mm.relative * px_to_world)
 
 
 ## Moves the camera along the ground following screen directions.
 func _pan_screen(screen: Vector2) -> void:
-	var right := global_transform.basis.x
-	var forward := global_transform.basis.z  # screen-down direction projected on the ground
-	right.y = 0.0
-	forward.y = 0.0
 	# Screen-vertical motion covers more ground because the camera is tilted.
-	var p := position + right.normalized() * screen.x + forward.normalized() * screen.y * 1.73
-	p.x = clampf(p.x, -PAN_LIMIT.x, PAN_LIMIT.x)
-	p.z = clampf(p.z, -PAN_LIMIT.y, PAN_LIMIT.y)
-	position = p
+	var uv := Terrain.to_uv(position) + Vector2(screen.x, screen.y * 1.73)
+	position = Terrain.to_world(uv.x, uv.y)
+	_clamp()
 
 
-## Projects a screen position onto the ground plane (y = 0).
-func screen_to_ground(screen_pos: Vector2) -> Variant:
-	var origin := camera.project_ray_origin(screen_pos)
-	var dir := camera.project_ray_normal(screen_pos)
-	if absf(dir.y) < 0.0001:
-		return null
-	var t := -origin.y / dir.y
-	return origin + dir * t
+func _clamp() -> void:
+	var uv := Terrain.to_uv(position)
+	uv.x = clampf(uv.x, -Terrain.HALF_U * 0.7, Terrain.HALF_U * 0.7)
+	uv.y = clampf(uv.y, -Terrain.HALF_V * 0.9, Terrain.HALF_V * 0.75)
+	position = Terrain.to_world(uv.x, uv.y)

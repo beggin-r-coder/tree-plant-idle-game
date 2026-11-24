@@ -19,7 +19,6 @@ var _t := 0.0
 var _target := Vector3.ZERO
 var _vel := Vector3.ZERO
 var _idle := 0.0
-var _base_y := 0.0
 
 
 func _ready() -> void:
@@ -43,7 +42,7 @@ func _pick_target() -> void:
 		return
 	var p: Vector3 = world.random_free_point()
 	if flyer:
-		p.y = randf_range(height_range.x, height_range.y)
+		p.y += randf_range(height_range.x, height_range.y)
 	_target = p
 
 
@@ -87,8 +86,8 @@ func _process_walker(delta: float) -> void:
 			position += dir * speed * delta
 			rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.z), clampf(delta * 6.0, 0.0, 1.0))
 	# Leg / hop animation
-	if hopper:
-		position.y = _base_y + (absf(sin(_t * 7.0)) * 0.25 if moving else 0.0)
+	var ground: float = world.height_at(position) if world else 0.0
+	position.y = ground + (absf(sin(_t * 7.0)) * 0.25 if (hopper and moving) else 0.0)
 	var swing := sin(_t * speed * 6.0) * 0.6 if moving else 0.0
 	for i in legs.size():
 		var phase := 1.0 if (i == 0 or i == 3) else -1.0

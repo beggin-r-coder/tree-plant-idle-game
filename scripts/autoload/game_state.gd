@@ -28,6 +28,8 @@ var fert_level: int = 0
 var stage: int = 0
 var selected: int = 0
 var lifetime_coins: float = 0.0
+## Where every visible tree stands: flat list of (plant_index, x, z). Written by Forest.
+var forest_layout := PackedFloat32Array()
 
 ## Filled after loading if machines worked while the game was closed.
 var offline_report: Dictionary = {}
@@ -50,6 +52,7 @@ func _reset_values() -> void:
 	stage = 0
 	selected = 0
 	lifetime_coins = 0.0
+	forest_layout = PackedFloat32Array()
 	trees_per_type.clear()
 	progress.clear()
 	unlocked.clear()
@@ -265,6 +268,7 @@ func save_game() -> void:
 		"stage": stage,
 		"selected": selected,
 		"lifetime_coins": lifetime_coins,
+		"forest_layout": Array(forest_layout),
 		"time": Time.get_unix_time_from_system(),
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -293,6 +297,9 @@ func load_game() -> void:
 	_load_array(d.get("progress", []), progress, TYPE_FLOAT)
 	_load_array(d.get("unlocked", []), unlocked, TYPE_BOOL)
 	_load_array(d.get("machine_level", []), machine_level, TYPE_INT)
+	var layout: Variant = d.get("forest_layout", [])
+	if typeof(layout) == TYPE_ARRAY:
+		forest_layout = PackedFloat32Array(layout as Array)
 	unlocked[0] = true
 	if not unlocked[selected]:
 		selected = 0
