@@ -13,6 +13,35 @@ mountains, a jungle and a rainbow appear, and animals move in.
 |---|---|---|---|
 | ![start](docs/screenshot_start.png) | ![mid](docs/screenshot_mid.png) | ![late](docs/screenshot_late.png) | ![shop](docs/screenshot_shop.png) |
 
+## Intro cinematic
+
+On first launch, a ~75-second cinematic shows why the game exists. It plays on the same island the player
+will later restore, while a **day counter** ticks up from Day 1 to Day 3,650 and an **AQI meter** climbs from
+22 (Good) to 999+ (Hazardous):
+
+1. A green island full of trees, deer, rabbits, birds and butterflies, with birdsong.
+2. *"But every day, we took a little more."* The trees fall one by one, leaving stumps, and the land dries out.
+3. Factories rise from the ground and smoke pours out of their chimneys. The sky turns grey.
+4. A road appears with cars puffing exhaust. Poison spreads across the ground, and the river and pond turn murky.
+5. Stylised lungs breathe, slowly turning grey and spotted. The breathing gets shallow, they cough, and a
+   heartbeat speeds up. *"Today, 9 out of 10 people on Earth breathe polluted air."*
+6. The animals and birds leave the island.
+7. An earthquake: the screen shakes, cracks spread across the ground, and the factories collapse in dust.
+8. The earthquake sets off a tsunami, a huge wave that rolls over the island, while lightning and rain
+   hit and the sea rises and floods the low land.
+9. Darkness. *"Day 3,650. Is this the future we want?"*
+10. A single glowing sapling: *"But it's not too late. Every tree you plant helps heal our Earth."*
+    Then the **Plant the first tree** button starts the game.
+
+It is made for children, so it stays emotional without being graphic: the animals leave rather than die.
+The soundtrack is **generated in code** (`intro_synth.gd`): a pad that slides from warm to dark, a factory
+hum, wind, rain, thunder, an earthquake rumble, a heartbeat, birdsong and a hopeful chime.
+Watch the full recording, with sound, in [`docs/intro_preview.mp4`](docs/intro_preview.mp4).
+
+![intro storyboard](docs/intro_storyboard.png)
+
+You can **Skip** it (or press Esc) at any time, and replay it from **Shop → Watch intro**.
+
 ## Running it
 
 1. Install **Godot 4.3** or newer (the standard build; you don't need the .NET version).
@@ -85,6 +114,13 @@ scripts/
   ui/hud.gd                    Minimal UI: coin and stat cards, milestone bar, plant tray, shop sheet, fact cards
   ui/plant_chip.gd             Round plant button with a growth ring
   ui/ui_icon.gd                Small vector icons drawn in code
+scenes/intro.tscn              Intro cinematic
+scripts/intro/
+  intro.gd                     Timeline / director: camera shots, captions, day counter, AQI, sky, sound
+  intro_world.gd               The 3D set: forest, factories + smoke, road + cars, poison, cracks, tsunami, rain, lightning
+  lungs_view.gd                Breathing lungs drawn in 2D
+  aqi_meter.gd                 Air Quality Index meter (US EPA colour bands)
+  intro_synth.gd               Procedural soundtrack (no audio files)
 ```
 
 The economy (`GameState`) only sends signals. The 3D world and the HUD listen to them, so you can rebalance
@@ -102,12 +138,17 @@ or replace visuals without touching the economy code.
 
 ### Dev flags
 Pass these after `--` on the command line, or under *Project Settings → Run → Main Run Args*:
-- `--fresh`: ignore the save file.
+- `--fresh`: ignore the save file (this also replays the intro).
+- `--no-intro`: skip the intro cinematic.
 - `--autotest`: fast-forward through every milestone to preview all visuals.
 - `--until=N`: stop the autotest at N trees.
 - `--shop`: open the shop before taking the screenshot.
 - `--zoom=N`: start zoomed out to camera size N.
 - `--shot=out.png`: save a screenshot and quit.
+
+Intro scene (`godot --path . res://scenes/intro.tscn -- ...`): `--shots=DIR` saves screenshots of 11 key
+moments, and `--finish-at=T` presses Skip after T seconds. To record the intro as a video, use Godot's
+Movie Maker: `--write-movie intro.avi --fixed-fps 30`.
 
 ## Ideas for next steps
 - Sound: click "pop", coin chime, birdsong and river ambience that grow with each stage.

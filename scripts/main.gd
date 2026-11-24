@@ -3,7 +3,8 @@ extends Node3D
 ## taps into tree growth.
 ##
 ## Dev command-line flags (after `--`):
-##   --fresh     start without loading the save file
+##   --fresh     start without loading the save file (this also replays the intro)
+##   --no-intro  skip the intro cinematic
 ##   --autotest  fast-forward through every milestone (for testing visuals)
 ##   --shot=PATH save a screenshot to PATH (after the autotest, or after 2.5s) and quit
 ##   --until=N   stop the autotest at N trees
@@ -18,6 +19,12 @@ var sun: DirectionalLight3D
 
 
 func _ready() -> void:
+	# First launch: play the intro cinematic first.
+	var args := OS.get_cmdline_user_args()
+	var dev_run := args.has("--autotest") or args.has("--no-intro") or _shot_path() != ""
+	if not GameState.intro_seen and not dev_run:
+		get_tree().change_scene_to_file.call_deferred("res://scenes/intro.tscn")
+		return
 	_build_environment()
 	world = World.new()
 	world.name = "World"

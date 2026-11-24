@@ -32,6 +32,10 @@ uniform float global_green = 0.0;     // how green the land far from the forest 
 uniform vec3 forest_center = vec3(0.0);
 uniform float green_radius = 0.0;     // land inside this radius around the forest is fully green
 uniform float water_y = -0.18;
+// Pollution overlay (used by the intro): land within poison_radius of poison_center turns toxic.
+uniform vec3 poison_center = vec3(0.0);
+uniform float poison_radius = 0.0;
+uniform vec3 poison_color : source_color = vec3(0.3, 0.32, 0.12);
 varying vec3 wp;
 varying vec3 wn;
 void vertex() {
@@ -44,6 +48,9 @@ void fragment() {
 	float near_forest = (1.0 - smoothstep(green_radius - 1.2, green_radius, d)) * step(0.01, green_radius);
 	float g = clamp(max(global_green, near_forest), 0.0, 1.0);
 	vec3 land = mix(dirt_color, grass_color, g);
+	float dp = length(wp.xz - poison_center.xz) + ragged * 0.8;
+	float poison = (1.0 - smoothstep(poison_radius - 2.5, poison_radius, dp)) * step(0.01, poison_radius);
+	land = mix(land, poison_color, poison * 0.85);
 	float slope = 1.0 - wn.y;
 	land = mix(land, rock_color, smoothstep(0.32, 0.5, slope));
 	float beach = smoothstep(water_y + 0.08, water_y + 0.22, wp.y);

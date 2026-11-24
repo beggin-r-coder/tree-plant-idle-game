@@ -30,6 +30,8 @@ var selected: int = 0
 var lifetime_coins: float = 0.0
 ## Where every visible tree stands: flat list of (plant_index, x, z). Written by Forest.
 var forest_layout := PackedFloat32Array()
+## True once the intro cinematic has been watched (or skipped). Survives "Restart game".
+var intro_seen := false
 
 ## Filled after loading if machines worked while the game was closed.
 var offline_report: Dictionary = {}
@@ -269,6 +271,7 @@ func save_game() -> void:
 		"selected": selected,
 		"lifetime_coins": lifetime_coins,
 		"forest_layout": Array(forest_layout),
+		"intro_seen": intro_seen,
 		"time": Time.get_unix_time_from_system(),
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -293,6 +296,7 @@ func load_game() -> void:
 	stage = int(d.get("stage", 0))
 	selected = int(d.get("selected", 0))
 	lifetime_coins = float(d.get("lifetime_coins", 0.0))
+	intro_seen = bool(d.get("intro_seen", false))
 	_load_array(d.get("trees_per_type", []), trees_per_type, TYPE_INT)
 	_load_array(d.get("progress", []), progress, TYPE_FLOAT)
 	_load_array(d.get("unlocked", []), unlocked, TYPE_BOOL)

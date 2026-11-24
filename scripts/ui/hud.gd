@@ -361,7 +361,19 @@ func _build_sheet() -> void:
 	restart.add_theme_color_override("font_hover_color", INK)
 	restart.add_theme_font_size_override("font_size", 16)
 	restart.pressed.connect(func() -> void: _confirm.popup_centered())
-	list.add_child(restart)
+	var intro := Button.new()
+	intro.text = "Watch intro"
+	intro.flat = true
+	intro.add_theme_color_override("font_color", MUTED)
+	intro.add_theme_color_override("font_hover_color", INK)
+	intro.add_theme_font_size_override("font_size", 16)
+	intro.pressed.connect(func() -> void: get_tree().change_scene_to_file("res://scenes/intro.tscn"))
+	var extras := _hbox(24)
+	extras.mouse_filter = Control.MOUSE_FILTER_PASS
+	extras.alignment = BoxContainer.ALIGNMENT_CENTER
+	extras.add_child(intro)
+	extras.add_child(restart)
+	list.add_child(extras)
 
 
 func _section(text: String) -> Label:

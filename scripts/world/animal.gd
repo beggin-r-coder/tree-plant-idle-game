@@ -19,6 +19,7 @@ var _t := 0.0
 var _target := Vector3.ZERO
 var _vel := Vector3.ZERO
 var _idle := 0.0
+var _leaving := false
 
 
 func _ready() -> void:
@@ -37,8 +38,23 @@ func arrive(from: Vector3, delay: float = 0.0) -> void:
 	_pick_target()
 
 
+## Walk (or fly) to a point, then shrink away and disappear. Used by the intro.
+func leave(to: Vector3) -> void:
+	_leaving = true
+	_target = to
+	_idle = 0.0
+	speed *= 2.6
+
+
+func _vanish() -> void:
+	set_process(false)
+	var tw := create_tween()
+	tw.tween_property(self, "scale", Vector3.ONE * 0.01, 0.4)
+	tw.tween_callback(queue_free)
+
+
 func _pick_target() -> void:
-	if world == null:
+	if world == null or _leaving:
 		return
 	var p: Vector3 = world.random_free_point()
 	if flyer:
@@ -57,6 +73,9 @@ func _process(delta: float) -> void:
 func _process_flyer(delta: float) -> void:
 	var to := _target - position
 	if to.length() < 0.8:
+		if _leaving:
+			_vanish()
+			return
 		_pick_target()
 	var desired := to.normalized() * speed
 	_vel = _vel.lerp(desired, clampf(delta * 1.5, 0.0, 1.0))
@@ -78,6 +97,9 @@ func _process_walker(delta: float) -> void:
 		var to := _target - position
 		to.y = 0.0
 		if to.length() < 0.3:
+			if _leaving:
+				_vanish()
+				return
 			_idle = randf_range(1.0, 4.0)
 			_pick_target()
 		else:
