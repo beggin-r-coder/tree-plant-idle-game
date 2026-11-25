@@ -3,11 +3,12 @@ extends Node3D
 ## taps into tree growth.
 ##
 ## Dev command-line flags (after `--`):
-##   --fresh     start without loading the save file (this also replays the intro)
-##   --no-intro  skip the intro cinematic
+##   --fresh     start without loading the save file (this also replays the intro, if enabled)
+##   --no-intro  skip the intro cinematic (it is currently disabled: GameData.INTRO_ENABLED)
 ##   --autotest  fast-forward through every milestone (for testing visuals)
 ##   --shot=PATH save a screenshot to PATH (after the autotest, or after 2.5s) and quit
 ##   --until=N   stop the autotest at N trees
+##   --showcase  trigger the golden butterfly, flying coins and confetti before the screenshot
 ##   --shop      open the shop before taking the screenshot
 ##   --zoom=N    start with camera size N (bigger = further away)
 
@@ -16,13 +17,15 @@ var cam: IsoCamera
 var hud: HUD
 var env: Environment
 var sun: DirectionalLight3D
+var audio: GameAudio
+var bonus: GoldenBonus
 
 
 func _ready() -> void:
 	# First launch: play the intro cinematic first.
 	var args := OS.get_cmdline_user_args()
 	var dev_run := args.has("--autotest") or args.has("--no-intro") or _shot_path() != ""
-	if not GameState.intro_seen and not dev_run:
+	if GameData.INTRO_ENABLED and not GameState.intro_seen and not dev_run:
 		get_tree().change_scene_to_file.call_deferred("res://scenes/intro.tscn")
 		return
 	_build_environment()
@@ -34,10 +37,23 @@ func _ready() -> void:
 	cam.name = "IsoCamera"
 	add_child(cam)
 	cam.focus(world.forest.center + Terrain.TOWARD * -3.0)
-	cam.tapped.connect(func(_pos: Vector2) -> void: GameState.click_grow())
+	cam.tapped.connect(_on_tap)
+	audio = GameAudio.new()
+	audio.name = "Audio"
+	add_child(audio)
+	bonus = GoldenBonus.new()
+	bonus.name = "GoldenBonus"
+	bonus.world = world
+	add_child(bonus)
+	bonus.collected.connect(_on_bonus)
 	hud = HUD.new()
 	hud.name = "HUD"
+	hud.camera = cam.camera
+	hud.audio = audio
 	add_child(hud)
+	world.forest.tree_grown.connect(_on_tree_grown)
+	GameState.clicked.connect(_on_clicked)
+	GameState.selected_changed.connect(func(i: int) -> void: cam.glide_to(world.forest.sapling_position(i), true))
 	GameState.stage_changed.connect(_on_stage_changed)
 	GameState.game_reset.connect(func() -> void: get_tree().reload_current_scene())
 	for a in OS.get_cmdline_user_args():
@@ -71,6 +87,39 @@ func _build_environment() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
 	add_child(sun)
+
+
+func _on_tap(pos: Vector2) -> void:
+	if bonus.try_collect(pos, cam.camera):
+		return
+	GameState.click_grow()
+
+
+func _on_clicked(i: int) -> void:
+	# The "pop" rises in pitch as the sapling grows: you can hear it getting close.
+	var p := clampf(GameState.progress[i] / GameState.growth_needed(i), 0.0, 1.0)
+	audio.play("pop", 0.85 + p * 0.6 + randf_range(-0.03, 0.03), -4.0)
+	Input.vibrate_handheld(8)
+
+
+func _on_tree_grown(i: int, pos: Vector3, earned: float) -> void:
+	var selected := i == GameState.selected
+	# Drones can finish trees many times a second, so keep their sounds/coins light.
+	audio.play("grow", randf_range(0.95, 1.08), 0.0 if selected else -10.0, 0.08 if selected else 0.6)
+	if selected or cam.is_on_screen(pos):
+		hud.fly_coins(pos, earned)
+	if selected:
+		Input.vibrate_handheld(25)
+		# Follow the forest edge: if the next sapling is off-screen, glide to it.
+		var next := world.forest.sapling_position(i)
+		if next != Vector3.INF and not cam.is_on_screen(next):
+			cam.glide_to(next)
+
+
+func _on_bonus(amount: float, at: Vector3) -> void:
+	audio.play("bonus")
+	hud.fly_coins(at, amount * 1000.0)
+	hud.show_toast("Golden butterfly!  +%s coins" % GameData.format_number(amount), bonus.next_fact())
 
 
 func _on_stage_changed(stage: int) -> void:
@@ -133,6 +182,15 @@ func _save_shot() -> void:
 	var shot := _shot_path()
 	if shot == "":
 		return
+	if OS.get_cmdline_user_args().has("--showcase"):
+		# Trigger the "juice" so a screenshot can show it: golden butterfly, flying coins, confetti.
+		bonus._timer = 0.0
+		await get_tree().create_timer(2.5).timeout
+		hud.confetti()
+		for k in 3:
+			GameState.click_grow()
+		hud.fly_coins(world.forest.sapling_position(GameState.selected), 500.0)
+		await get_tree().create_timer(0.45).timeout
 	if OS.get_cmdline_user_args().has("--shop"):
 		hud.open_shop()
 		await get_tree().create_timer(0.6).timeout

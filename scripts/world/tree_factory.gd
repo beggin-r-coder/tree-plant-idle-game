@@ -13,6 +13,7 @@ static func tree_mesh(plant_id: String) -> ArrayMesh:
 	if _cache.has(plant_id):
 		return _cache[plant_id]
 	var b := LowPoly.Builder.new()
+	b.sway = 0.018
 	match plant_id:
 		"bush": _bush(b)
 		"oak": _oak(b)

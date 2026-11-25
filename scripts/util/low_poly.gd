@@ -6,6 +6,26 @@ extends RefCounted
 
 static var _material: StandardMaterial3D
 static var _unshaded: StandardMaterial3D
+static var _sway := {}   ## strength -> ShaderMaterial
+
+const SWAY_SHADER := """
+shader_type spatial;
+render_mode specular_disabled;
+// Wind sway: vertices bend more the higher they are above the mesh origin (the ground),
+// with a phase that depends on world position so neighbours don't move in sync.
+uniform float strength = 0.02;
+void vertex() {
+	vec3 origin = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	float h = max(VERTEX.y, 0.0);
+	float w = sin(TIME * 1.4 + origin.x * 0.35 + origin.z * 0.27) + 0.35 * sin(TIME * 3.3 + origin.x * 0.9 - origin.z * 0.6);
+	VERTEX.x += w * strength * h * h;
+	VERTEX.z += w * strength * 0.6 * h * h;
+}
+void fragment() {
+	ALBEDO = COLOR.rgb;
+	ROUGHNESS = 0.92;
+}
+"""
 
 
 static func material() -> StandardMaterial3D:
@@ -15,6 +35,18 @@ static func material() -> StandardMaterial3D:
 		_material.roughness = 0.92
 		_material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	return _material
+
+
+## Shaded vertex-colour material with wind sway (cached per strength).
+static func sway_material(strength: float) -> ShaderMaterial:
+	if not _sway.has(strength):
+		var sh := Shader.new()
+		sh.code = SWAY_SHADER
+		var m := ShaderMaterial.new()
+		m.shader = sh
+		m.set_shader_parameter("strength", strength)
+		_sway[strength] = m
+	return _sway[strength]
 
 
 static func unshaded_material() -> StandardMaterial3D:
@@ -90,6 +122,7 @@ class Builder:
 	var count := 0
 	var shade_variance := 0.06
 	var unshaded := false
+	var sway := 0.0   ## > 0: use the wind-sway material
 
 	func _init() -> void:
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -135,7 +168,12 @@ class Builder:
 
 	func commit() -> ArrayMesh:
 		var m := st.commit()
-		m.surface_set_material(0, LowPoly.unshaded_material() if unshaded else LowPoly.material())
+		var mat: Material = LowPoly.material()
+		if unshaded:
+			mat = LowPoly.unshaded_material()
+		elif sway > 0.0:
+			mat = LowPoly.sway_material(sway)
+		m.surface_set_material(0, mat)
 		return m
 
 

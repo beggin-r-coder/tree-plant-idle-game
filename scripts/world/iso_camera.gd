@@ -18,6 +18,8 @@ var _press_pos := Vector2.ZERO
 var _side_drag := false
 var _touches := {}
 var _pinch_dist := 0.0
+var _glide: Tween
+var _last_manual := -100.0
 
 
 func _ready() -> void:
@@ -34,6 +36,32 @@ func _ready() -> void:
 	camera.far = 200.0
 	tilt.add_child(camera)
 	camera.make_current()
+
+
+## Smoothly moves the view to a world point, unless the player panned by hand very recently.
+func glide_to(world_pos: Vector3, force: bool = false) -> void:
+	if not force and _now() - _last_manual < 4.0:
+		return
+	var uv := Terrain.to_uv(world_pos)
+	var target := Terrain.to_world(uv.x, uv.y)
+	if _glide:
+		_glide.kill()
+	var move := func(p: Vector3) -> void:
+		position = p
+		_clamp()
+	_glide = create_tween()
+	_glide.tween_method(move, position, target, 0.9).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+
+## True if a world point is comfortably inside the visible play area (between the top and bottom UI).
+func is_on_screen(world_pos: Vector3) -> bool:
+	var vp := get_viewport().get_visible_rect().size
+	var sp := camera.unproject_position(world_pos)
+	return sp.x > vp.x * 0.1 and sp.x < vp.x * 0.9 and sp.y > 190.0 and sp.y < vp.y - 230.0
+
+
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
 
 
 func focus(world_pos: Vector3) -> void:
@@ -117,6 +145,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Moves the camera along the ground following screen directions.
 func _pan_screen(screen: Vector2) -> void:
+	_last_manual = _now()
+	if _glide:
+		_glide.kill()
 	# Screen-vertical motion covers more ground because the camera is tilted.
 	var uv := Terrain.to_uv(position) + Vector2(screen.x, screen.y * 1.73)
 	position = Terrain.to_world(uv.x, uv.y)

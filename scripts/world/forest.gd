@@ -8,6 +8,8 @@ extends Node3D
 ## Trees are drawn with one MultiMesh per species, so hundreds stay cheap.
 
 signal extent_changed(radius: float)
+## A tree finished growing at `pos` (used for flying coins and sounds).
+signal tree_grown(plant_index: int, pos: Vector3, earned: float)
 
 const MAX_TREES := 700
 const CENTER_UV := Vector2(0.0, 9.0)   ## where the first tree grows (lower-middle of the screen)
@@ -30,6 +32,7 @@ var _popup_accum: Array[float] = []
 var _popup_timer: Array[float] = []
 var _marker: Node3D
 var _particles: CPUParticles3D
+var _tap_puff: CPUParticles3D
 var _pops := 0
 var _rng := RandomNumberGenerator.new()
 var _t := 0.0
@@ -241,6 +244,10 @@ func _new_sapling(i: int) -> void:
 
 func on_click(i: int) -> void:
 	_bounce[i] = 1.0
+	if _sapling_spot[i] != Vector3.INF:
+		var s := _saplings[i].scale.y
+		_tap_puff.global_position = _sapling_spot[i] + Vector3(0, 0.3 + s * 1.2, 0)
+		_tap_puff.restart()
 
 
 func on_trees_completed(i: int, count: int, earned: float) -> void:
@@ -248,6 +255,7 @@ func on_trees_completed(i: int, count: int, earned: float) -> void:
 		_particles.global_position = _sapling_spot[i] + Vector3(0, 0.6, 0)
 		_particles.restart()
 	_popup_accum[i] += earned
+	tree_grown.emit(i, _sapling_spot[i], earned)
 	for k in count:
 		if total_visible() >= MAX_TREES:
 			break
@@ -367,6 +375,15 @@ func _build_particles() -> void:
 	_particles.gravity = Vector3(0, -6, 0)
 	_particles.mesh = LowPoly.mesh(LowPoly.box(Vector3(0.12, 0.03, 0.08)), Color(0.55, 0.85, 0.35))
 	add_child(_particles)
+	# Small leaf puff on every tap.
+	_tap_puff = _particles.duplicate() as CPUParticles3D
+	_tap_puff.amount = 6
+	_tap_puff.lifetime = 0.5
+	_tap_puff.initial_velocity_min = 1.0
+	_tap_puff.initial_velocity_max = 2.0
+	_tap_puff.scale_amount_min = 0.5
+	_tap_puff.scale_amount_max = 0.8
+	add_child(_tap_puff)
 
 
 func _coin_popup(p: Vector3, amount: float) -> void:

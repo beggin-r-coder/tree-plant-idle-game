@@ -35,6 +35,15 @@ var _toast_timer := 0.0
 var _refresh_timer := 0.0
 var _confirm: ConfirmationDialog
 
+## Set by main: used to project 3D positions (flying coins) and to play sounds.
+var camera: Camera3D
+var audio: GameAudio
+var _coins_pill: Control
+var _coin_icon: Control
+var _shown_coins := 0.0
+var _sound_btn: Button
+var _flying := 0
+
 
 func _ready() -> void:
 	_root = Control.new()
@@ -42,6 +51,7 @@ func _ready() -> void:
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.theme = _make_theme()
 	add_child(_root)
+	_shown_coins = GameState.coins
 	_build_top()
 	_build_tray()
 	_build_toast()
@@ -150,9 +160,11 @@ func _build_top() -> void:
 	coins.offset_top = 24
 	coins.add_theme_stylebox_override("panel", _box(CARD, 28, 12, true))
 	_root.add_child(coins)
+	_coins_pill = coins
 	var ch := _hbox(10)
 	coins.add_child(ch)
-	ch.add_child(UIIcon.make("coin", 40))
+	_coin_icon = UIIcon.make("coin", 40)
+	ch.add_child(_coin_icon)
 	var cv := _vbox(-6)
 	_coins_label = _label("0", 32)
 	_cps_label = _label("", 15, MUTED)
@@ -368,10 +380,18 @@ func _build_sheet() -> void:
 	intro.add_theme_color_override("font_hover_color", INK)
 	intro.add_theme_font_size_override("font_size", 16)
 	intro.pressed.connect(func() -> void: get_tree().change_scene_to_file("res://scenes/intro.tscn"))
+	_sound_btn = Button.new()
+	_sound_btn.flat = true
+	_sound_btn.add_theme_color_override("font_color", MUTED)
+	_sound_btn.add_theme_color_override("font_hover_color", INK)
+	_sound_btn.add_theme_font_size_override("font_size", 16)
+	_sound_btn.pressed.connect(_toggle_sound)
 	var extras := _hbox(24)
+	extras.add_child(_sound_btn)
 	extras.mouse_filter = Control.MOUSE_FILTER_PASS
 	extras.alignment = BoxContainer.ALIGNMENT_CENTER
-	extras.add_child(intro)
+	if GameData.INTRO_ENABLED:
+		extras.add_child(intro)
 	extras.add_child(restart)
 	list.add_child(extras)
 
@@ -488,6 +508,15 @@ func _on_toast_input(e: InputEvent) -> void:
 # ------------------------------------------------------------------ refresh
 
 func _process(delta: float) -> void:
+	# Coins count up smoothly instead of jumping (spending drops instantly).
+	var target := GameState.coins
+	if target < _shown_coins:
+		_shown_coins = target
+	else:
+		_shown_coins = lerpf(_shown_coins, target, clampf(delta * 8.0, 0.0, 1.0))
+		if target - _shown_coins < 0.5:
+			_shown_coins = target
+	_coins_label.text = GameData.format_number(_shown_coins)
 	if _toast.visible:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0:
@@ -500,7 +529,6 @@ func _process(delta: float) -> void:
 
 func _refresh() -> void:
 	var gs := GameState
-	_coins_label.text = GameData.format_number(gs.coins)
 	var cps := gs.coins_per_second()
 	_cps_label.text = "+%s / sec" % GameData.format_number(cps) if cps > 0.0 else "coins"
 	_trees_label.text = "%s trees" % GameData.format_number(gs.total_trees)
@@ -559,6 +587,7 @@ func _refresh() -> void:
 		(r["content"] as Control).modulate.a = 1.0 if can else 0.6
 		any_affordable = any_affordable or can
 	_shop_badge.visible = any_affordable
+	_sound_btn.text = "Sound: On" if GameState.sound_on else "Sound: Off"
 
 
 func _fmt_rate(v: float) -> String:
@@ -581,17 +610,92 @@ func _format_time(seconds: float) -> String:
 func _on_chip(i: int) -> void:
 	if GameState.unlocked[i]:
 		GameState.select_plant(i)
-	elif not GameState.try_unlock(i):
+	elif GameState.try_unlock(i):
+		_play("unlock")
+	else:
+		_play("nope")
 		show_toast("%s is locked" % GameData.PLANTS[i]["name"], "Collect %s coins to plant it." % GameData.format_number(GameState.unlock_cost(i)))
 	_refresh()
 
 
 func _on_buy(kind: String, i: int) -> void:
+	var ok := false
 	match kind:
-		"click": GameState.try_buy_click_upgrade()
-		"fert": GameState.try_buy_fert_upgrade()
-		"drone": GameState.try_buy_machine(i)
+		"click": ok = GameState.try_buy_click_upgrade()
+		"fert": ok = GameState.try_buy_fert_upgrade()
+		"drone": ok = GameState.try_buy_machine(i)
+	_play("buy" if ok else "nope")
 	_refresh()
+
+
+func _play(sfx: String, pitch: float = 1.0) -> void:
+	if audio:
+		audio.play(sfx, pitch)
+
+
+func _toggle_sound() -> void:
+	if audio:
+		audio.set_sound_on(not GameState.sound_on)
+	_refresh()
+
+
+# ------------------------------------------------------------------ juice
+
+## Little coins fly from a 3D point (a tree that just grew) into the coin counter.
+func fly_coins(world_pos: Vector3, amount: float) -> void:
+	if camera == null or _flying > 12:
+		return
+	var from := camera.unproject_position(world_pos + Vector3(0, 1.5, 0))
+	var to := _coin_icon.get_global_rect().get_center() - Vector2(13, 13)
+	var n := clampi(2 + int(log(maxf(amount, 1.0)) / log(10.0)), 2, 6)
+	for k in n:
+		var c := UIIcon.make("coin", 26)
+		c.size = Vector2(26, 26)
+		c.position = from + Vector2(randf_range(-24, 24), randf_range(-16, 16))
+		_root.add_child(c)
+		_flying += 1
+		var start := c.position
+		var ctrl := start.lerp(to, 0.35) + Vector2(randf_range(-60, 60), -120)
+		var arc := func(t: float) -> void:
+			var a := start.lerp(ctrl, t)
+			var b := ctrl.lerp(to, t)
+			c.position = a.lerp(b, t)
+		var tw := create_tween()
+		tw.tween_interval(k * 0.06)
+		tw.tween_method(arc, 0.0, 1.0, 0.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw.tween_callback(_coin_arrived.bind(c, k == n - 1))
+
+
+func _coin_arrived(c: Control, last: bool) -> void:
+	c.queue_free()
+	_flying -= 1
+	if last:
+		_play("coin", randf_range(0.97, 1.05))
+	_coins_pill.pivot_offset = _coins_pill.size * 0.5
+	var tw := create_tween()
+	tw.tween_property(_coins_pill, "scale", Vector2.ONE * 1.07, 0.05)
+	tw.tween_property(_coins_pill, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## A burst of colourful confetti falling over the screen (milestones).
+func confetti() -> void:
+	var vp := _root.get_viewport_rect().size
+	var colors := [Color(1, 0.4, 0.5), Color(1, 0.85, 0.2), Color(0.4, 0.8, 0.45), Color(0.35, 0.65, 1.0), Color(0.8, 0.5, 1.0), Color(1, 0.6, 0.2)]
+	for k in 80:
+		var r := ColorRect.new()
+		r.color = colors[k % colors.size()]
+		r.size = Vector2(randf_range(8, 14), randf_range(12, 20))
+		r.pivot_offset = r.size * 0.5
+		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var x := randf_range(0, vp.x)
+		r.position = Vector2(x, randf_range(-120, -20))
+		r.rotation = randf() * TAU
+		_root.add_child(r)
+		var dur := randf_range(1.8, 3.0)
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(r, "position", Vector2(x + randf_range(-120, 120), vp.y + 40), dur).set_delay(randf() * 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(r, "rotation", r.rotation + randf_range(-8, 8), dur)
+		tw.chain().tween_callback(r.queue_free)
 
 
 func _on_plant_unlocked(i: int) -> void:
@@ -602,3 +706,5 @@ func _on_plant_unlocked(i: int) -> void:
 func _on_stage_changed(stage: int) -> void:
 	var st: Dictionary = GameData.STAGES[stage]
 	show_toast(st["title"], st["fact"])
+	confetti()
+	_play("fanfare")

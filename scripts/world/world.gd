@@ -240,6 +240,7 @@ func _build_grass(node: Node3D, animate: bool) -> void:
 	var meshes: Array = []
 	for v in 3:
 		var b := LowPoly.Builder.new()
+		b.sway = 0.45
 		var g := Color(0.35, 0.62, 0.25).lightened(v * 0.07)
 		b.add(LowPoly.cone(0.08, 0.45, 3), g, LowPoly.xf(Vector3(0, 0.2, 0), Vector3(0, 0, 12)))
 		b.add(LowPoly.cone(0.08, 0.35, 3), g, LowPoly.xf(Vector3(0.1, 0.15, 0.05), Vector3(0, 0, -18)))
@@ -253,6 +254,7 @@ func _build_flowers(node: Node3D, animate: bool) -> void:
 	var meshes: Array = []
 	for c in colors:
 		var b := LowPoly.Builder.new()
+		b.sway = 0.35
 		for f in 3:
 			var off := Vector3(cos(f * 2.1) * 0.15, 0, sin(f * 2.1) * 0.15)
 			b.add(LowPoly.cylinder(0.015, 0.015, 0.35, 3), Color(0.3, 0.6, 0.25), LowPoly.xf(off + Vector3(0, 0.15, 0)))
@@ -264,10 +266,12 @@ func _build_flowers(node: Node3D, animate: bool) -> void:
 
 func _build_jungle(node: Node3D, animate: bool) -> void:
 	var fern := LowPoly.Builder.new()
+	fern.sway = 0.3
 	for k in 6:
 		var ang := k * 60.0
 		fern.add(LowPoly.box(Vector3(0.12, 0.03, 0.7)), Color(0.2, 0.55, 0.2), LowPoly.xf(Vector3(sin(deg_to_rad(ang)) * 0.3, 0.2, cos(deg_to_rad(ang)) * 0.3), Vector3(-30, ang, 0)))
 	var bamboo := LowPoly.Builder.new()
+	bamboo.sway = 0.03
 	for k in 4:
 		var off := Vector3(cos(k * 1.7) * 0.25, 0, sin(k * 1.7) * 0.25)
 		var h := 1.6 + k * 0.35

@@ -98,6 +98,10 @@ const STAGES: Array[Dictionary] = [
 	},
 ]
 
+## The intro cinematic (scenes/intro.tscn) is hidden for now. Set to true to play it on first launch
+## and show "Watch intro" in the shop again.
+const INTRO_ENABLED := false
+
 const CLICK_BASE_COST := 10.0
 const CLICK_COST_GROWTH := 1.55
 const FERT_BASE_COST := 300.0

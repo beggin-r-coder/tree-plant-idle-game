@@ -13,9 +13,12 @@ mountains, a jungle and a rainbow appear, and animals move in.
 |---|---|---|---|
 | ![start](docs/screenshot_start.png) | ![mid](docs/screenshot_mid.png) | ![late](docs/screenshot_late.png) | ![shop](docs/screenshot_shop.png) |
 
-## Intro cinematic
+## Intro cinematic (currently hidden)
 
-On first launch, a ~75-second cinematic shows why the game exists. It plays on the same island the player
+> The intro is **switched off for now**. Set `INTRO_ENABLED := true` in `scripts/data/game_data.gd` to play it
+> on first launch and show **Shop → Watch intro** again. All its code is still in the project.
+
+When enabled, a ~75-second cinematic shows why the game exists. It plays on the same island the player
 will later restore, while a **day counter** ticks up from Day 1 to Day 3,650 and an **AQI meter** climbs from
 22 (Good) to 999+ (Hazardous):
 
@@ -91,6 +94,21 @@ The ground turns green in a growing circle around the forest, and the whole isla
 milestone. Every milestone and every new plant shows a short, kid-friendly **eco fact** card. The top-right
 card also shows roughly how much **CO2** the player's forest absorbs per year.
 
+### Feel and feedback
+- **Sound** (all synthesized in code, `scripts/audio/game_audio.gd`): every tap makes a soft "pop" that rises
+  in pitch as the sapling grows, so you can *hear* it getting close. Finished trees sparkle, coins ding as they
+  land in the counter, and unlocks and milestones play little fanfares. The background sound follows the
+  ecosystem: barren land is windy and silent, the river starts to babble once it flows, and more and more birds
+  sing as nature returns. Turn it on or off with **Shop → Sound**.
+- **A living world**: trees, grass, flowers and ferns sway in the wind, and leaves puff out on every tap.
+- **Coins fly** from the tree that just grew into the coin counter, which counts up smoothly and bounces.
+- **Milestones** burst with confetti and a fanfare.
+- **The camera follows your sapling**: it glides there when you pick a plant, and when the forest edge moves
+  off-screen. It never fights you: after you pan by hand it waits a few seconds.
+- **Golden butterfly**: about once a minute a sparkling golden butterfly visits your sapling for a few
+  seconds. Tap it for bonus coins and a pollinator fact.
+- **Haptics**: a light vibration on taps and finished trees (phones and tablets).
+
 The game **autosaves** every 10 seconds and when you quit, including the exact spot of every tree.
 **Offline progress** gives you what your drones grew while the game was closed (up to 8 hours).
 
@@ -114,6 +132,8 @@ scripts/
   ui/hud.gd                    Minimal UI: coin and stat cards, milestone bar, plant tray, shop sheet, fact cards
   ui/plant_chip.gd             Round plant button with a growth ring
   ui/ui_icon.gd                Small vector icons drawn in code
+  audio/game_audio.gd          Synthesized sound effects + ambient bed (rendered on a worker thread at startup)
+  world/golden_bonus.gd        The golden butterfly bonus
 scenes/intro.tscn              Intro cinematic
 scripts/intro/
   intro.gd                     Timeline / director: camera shots, captions, day counter, AQI, sky, sound
@@ -143,6 +163,7 @@ Pass these after `--` on the command line, or under *Project Settings → Run �
 - `--autotest`: fast-forward through every milestone to preview all visuals.
 - `--until=N`: stop the autotest at N trees.
 - `--shop`: open the shop before taking the screenshot.
+- `--showcase`: trigger the golden butterfly, flying coins and confetti before the screenshot.
 - `--zoom=N`: start zoomed out to camera size N.
 - `--shot=out.png`: save a screenshot and quit.
 
@@ -151,7 +172,6 @@ moments, and `--finish-at=T` presses Skip after T seconds. To record the intro a
 Movie Maker: `--write-movie intro.avi --fixed-fps 30`.
 
 ## Ideas for next steps
-- Sound: click "pop", coin chime, birdsong and river ambience that grow with each stage.
 - A short quiz after each milestone, with a coin bonus for right answers.
 - Seasons, day/night, and threats (wildfire, litter, drought) that kids learn to prevent.
 - An HTML5 export for classrooms, and Android/iOS builds.

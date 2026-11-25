@@ -32,6 +32,8 @@ var lifetime_coins: float = 0.0
 var forest_layout := PackedFloat32Array()
 ## True once the intro cinematic has been watched (or skipped). Survives "Restart game".
 var intro_seen := false
+## Player setting: sound on/off. Survives "Restart game".
+var sound_on := true
 
 ## Filled after loading if machines worked while the game was closed.
 var offline_report: Dictionary = {}
@@ -272,6 +274,7 @@ func save_game() -> void:
 		"lifetime_coins": lifetime_coins,
 		"forest_layout": Array(forest_layout),
 		"intro_seen": intro_seen,
+		"sound_on": sound_on,
 		"time": Time.get_unix_time_from_system(),
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -297,6 +300,7 @@ func load_game() -> void:
 	selected = int(d.get("selected", 0))
 	lifetime_coins = float(d.get("lifetime_coins", 0.0))
 	intro_seen = bool(d.get("intro_seen", false))
+	sound_on = bool(d.get("sound_on", true))
 	_load_array(d.get("trees_per_type", []), trees_per_type, TYPE_INT)
 	_load_array(d.get("progress", []), progress, TYPE_FLOAT)
 	_load_array(d.get("unlocked", []), unlocked, TYPE_BOOL)
